@@ -8,16 +8,15 @@ use AIArmada\CommerceSupport\Support\OwnerContext;
 use AIArmada\CommerceSupport\Traits\HasOwner;
 use AIArmada\CommerceSupport\Traits\HasOwnerScopeConfig;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
-use RuntimeException;
+use InvalidArgumentException;
 
 /**
  * Standard owner scoping for cart models.
  *
  * - Uses commerce-support HasOwner columns: owner_type / owner_id
  * - When cart.owner.enabled=true, scopeForOwner() resolves owner via OwnerContext
- * - When enabled and no owner context exists, saves are blocked (fail-fast)
+ * - When enabled and no owner context exists, reads and writes are blocked (fail-fast)
  */
 trait HasCartOwner
 {
@@ -45,51 +44,42 @@ trait HasCartOwner
         return $owner;
     }
 
+    public static function hasExplicitGlobalOwnerContext(): bool
+    {
+        return self::ownerScopingEnabled() && OwnerContext::isExplicitGlobal();
+    }
+
     /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */
-    public function scopeForOwner(Builder $query, ?EloquentModel $owner = null, bool $includeGlobal = false): Builder
+    public function scopeForOwner(Builder $query, EloquentModel | string | null $owner = OwnerContext::CURRENT, bool $includeGlobal = false): Builder
     {
         if (! self::ownerScopingEnabled()) {
             return $query;
         }
 
-        if ($owner === null) {
+        if ($owner === OwnerContext::CURRENT) {
             $owner = self::resolveCurrentOwner();
+
+            OwnerContext::assertResolvedOrExplicitGlobal(
+                $owner,
+                static::class . ' requires an owner context or explicit global context.',
+            );
         }
 
-        $includeGlobal = $includeGlobal && (bool) config('cart.owner.include_global', false);
+        if (is_string($owner)) {
+            throw new InvalidArgumentException('Owner must be an Eloquent model, null, or omitted.');
+        }
+
+        OwnerContext::assertResolvedOrExplicitGlobal(
+            $owner,
+            static::class . ' requires an owner context or explicit global context.',
+        );
 
         /** @var Builder<static> $scoped */
         $scoped = $this->baseScopeForOwner($query, $owner, $includeGlobal);
 
         return $scoped;
-    }
-
-    protected static function bootHasCartOwner(): void
-    {
-        static::saving(function (Model $model): void {
-            if (! static::ownerScopingEnabled()) {
-                return;
-            }
-
-            if ($model->getAttribute('owner_type') !== null && $model->getAttribute('owner_id') !== null) {
-                return;
-            }
-
-            $owner = static::resolveCurrentOwner();
-
-            if ($owner === null) {
-                throw new RuntimeException(sprintf(
-                    '%s requires an owner context when cart.owner.enabled=true.',
-                    $model::class
-                ));
-            }
-
-            /** @var static $scopedModel */
-            $scopedModel = $model;
-            $scopedModel->assignOwner($owner);
-        });
     }
 }

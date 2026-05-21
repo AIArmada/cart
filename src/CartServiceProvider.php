@@ -32,6 +32,7 @@ final class CartServiceProvider extends PackageServiceProvider
         $package
             ->name('cart')
             ->hasConfigFile()
+            ->runsMigrations()
             ->discoversMigrations()
             ->hasCommands([
                 Console\Commands\ClearAbandonedCartsCommand::class,
@@ -112,6 +113,13 @@ final class CartServiceProvider extends PackageServiceProvider
                 if ($owner !== null) {
                     return $storage->withOwner($owner);
                 }
+
+                if (! OwnerContext::isExplicitGlobal()) {
+                    throw new RuntimeException(
+                        'Cart owner is enabled but no owner was resolved while resolving cart storage. ' .
+                        'Use ' . OwnerContext::class . '::withOwner(null, ...) for explicit global cart access.'
+                    );
+                }
             }
 
             return $storage;
@@ -137,7 +145,9 @@ final class CartServiceProvider extends PackageServiceProvider
 
     protected function registerMigrationService(): void
     {
-        $this->app->singleton(CartMigrationService::class, fn () => new CartMigrationService);
+        $this->app->singleton(CartMigrationService::class, fn () => new CartMigrationService(
+            config('cart.migration', []),
+        ));
     }
 
     protected function registerEventListeners(): void

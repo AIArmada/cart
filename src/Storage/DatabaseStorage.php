@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace AIArmada\Cart\Storage;
 
 use AIArmada\Cart\Exceptions\CartConflictException;
+use AIArmada\Cart\Models\CartModel;
+use AIArmada\Cart\Support\CartOwnerScope;
+use AIArmada\CommerceSupport\Support\OwnerScopeKey;
+use AIArmada\CommerceSupport\Support\OwnerTuple\OwnerTupleColumns;
 use Closure;
 use DateTimeInterface;
 use Illuminate\Database\ConnectionInterface as Database;
@@ -148,11 +152,12 @@ final readonly class DatabaseStorage implements StorageInterface
         // Only allow flush in testing environments to prevent accidental data loss
         if (app()->environment(['testing', 'local'])) {
             $query = $this->database->table($this->table);
+            $columns = $this->ownerTupleColumns();
 
             // If owner scoped, only flush owner's carts
             if ($this->ownerType !== null && $this->ownerId !== null) {
-                $query->where('owner_type', $this->ownerType)
-                    ->where('owner_id', (string) $this->ownerId);
+                $query->where($columns->ownerTypeColumn, $this->ownerType)
+                    ->where($columns->ownerIdColumn, (string) $this->ownerId);
                 $query->delete();
             } else {
                 $query->truncate();
@@ -464,22 +469,15 @@ final readonly class DatabaseStorage implements StorageInterface
      */
     private function applyOwnerConstraints(Builder $query): void
     {
-        if ($this->ownerType !== null && $this->ownerId !== null) {
-            $query->where('owner_type', $this->ownerType)
-                ->where('owner_id', (string) $this->ownerId);
+        CartOwnerScope::applyForOwner($query, $this->ownerType, $this->ownerId);
+    }
 
-            return;
-        }
-
-        $query
-            ->where(function (Builder $builder): void {
-                $builder->whereNull('owner_type')
-                    ->orWhere('owner_type', '');
-            })
-            ->where(function (Builder $builder): void {
-                $builder->whereNull('owner_id')
-                    ->orWhere('owner_id', '');
-            });
+    /**
+     * Resolve the internal uniqueness key for the current owner scope.
+     */
+    private function resolveOwnerScope(): string
+    {
+        return OwnerScopeKey::forTypeAndId($this->ownerType, $this->ownerId);
     }
 
     /**
@@ -665,6 +663,8 @@ final readonly class DatabaseStorage implements StorageInterface
     private function performCasUpdate(string $identifier, string $instance, array $data, string $operationName): void
     {
         $this->database->transaction(function () use ($identifier, $instance, $data, $operationName): void {
+            $ownerColumns = $this->ownerTupleColumns();
+
             /** @var stdClass|null $current */
             $current = $this->applyLockForUpdate(
                 $this->baseQuery($identifier, $instance)
@@ -672,8 +672,9 @@ final readonly class DatabaseStorage implements StorageInterface
 
             if ($current) {
                 $updateData = array_merge($data, [
-                    'owner_type' => $this->ownerType ?? '',
-                    'owner_id' => $this->ownerId !== null ? (string) $this->ownerId : '',
+                    $ownerColumns->ownerTypeColumn => $this->ownerType,
+                    $ownerColumns->ownerIdColumn => $this->ownerId !== null ? (string) $this->ownerId : null,
+                    'owner_scope' => $this->resolveOwnerScope(),
                     'version' => $current->version + 1,
                     'updated_at' => now(),
                     'expires_at' => $this->calculateExpiresAt(),
@@ -691,8 +692,9 @@ final readonly class DatabaseStorage implements StorageInterface
                     'id' => Str::uuid(),
                     'identifier' => $identifier,
                     'instance' => $instance,
-                    'owner_type' => $this->ownerType ?? '',
-                    'owner_id' => $this->ownerId !== null ? (string) $this->ownerId : '',
+                    $ownerColumns->ownerTypeColumn => $this->ownerType,
+                    $ownerColumns->ownerIdColumn => $this->ownerId !== null ? (string) $this->ownerId : null,
+                    'owner_scope' => $this->resolveOwnerScope(),
                     'version' => 1,
                     'expires_at' => $this->calculateExpiresAt(),
                     'created_at' => now(),
@@ -720,5 +722,10 @@ final readonly class DatabaseStorage implements StorageInterface
             $expectedVersion,
             $currentVersion
         );
+    }
+
+    private function ownerTupleColumns(): OwnerTupleColumns
+    {
+        return OwnerTupleColumns::forModelClass(CartModel::class);
     }
 }

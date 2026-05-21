@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AIArmada\Cart\Listeners;
 
 use AIArmada\Cart\Services\CartMigrationService;
+use AIArmada\Cart\Support\LoginMigrationCacheKey;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Cache;
 
@@ -20,11 +21,14 @@ final class HandleUserLogin
     public function handle(Login $event): void
     {
         // Try to retrieve the old session ID from cache
-        $userIdentifier = $this->getUserIdentifier($event->user);
         $oldSessionId = null;
 
-        if ($userIdentifier) {
-            $oldSessionId = Cache::pull("cart_migration_{$userIdentifier}");
+        foreach ($this->getUserIdentifiers($event->user) as $userIdentifier) {
+            $oldSessionId = Cache::pull(LoginMigrationCacheKey::make($userIdentifier));
+
+            if ($oldSessionId !== null) {
+                break;
+            }
         }
 
         // Migrate guest cart to user cart using old session ID
@@ -43,14 +47,20 @@ final class HandleUserLogin
     }
 
     /**
-     * Extract user identifier from user object.
+     * Extract possible user identifiers from the authenticated user.
+     *
+     * @return array<int, string>
      */
-    private function getUserIdentifier(mixed $user): ?string
+    private function getUserIdentifiers(mixed $user): array
     {
-        // Try common user identifier fields
-        return $user->email
-            ?? $user->username
-            ?? $user->phone
-            ?? null;
+        return collect([
+            $user->email ?? null,
+            $user->username ?? null,
+            $user->phone ?? null,
+        ])
+            ->filter(fn (mixed $identifier): bool => is_string($identifier) && $identifier !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 }

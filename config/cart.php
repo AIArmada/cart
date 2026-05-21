@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-use AIArmada\Cart\Models\CartModel;
 
 return [
     /*
@@ -12,7 +11,6 @@ return [
     'database' => [
         'table' => env('CART_DB_TABLE', 'carts'),
         'conditions_table' => env('CART_CONDITIONS_TABLE', 'conditions'),
-        'events_table' => env('CART_EVENTS_TABLE', 'cart_events'),
         'json_column_type' => env('CART_JSON_COLUMN_TYPE', env('COMMERCE_JSON_COLUMN_TYPE', 'json')),
         'ttl' => env('CART_DB_TTL', 60 * 60 * 24 * 30), // 30 days, null to disable
         'lock_for_update' => env('CART_DB_LOCK_FOR_UPDATE', false),
@@ -23,10 +21,6 @@ return [
     | Defaults
     |--------------------------------------------------------------------------
     */
-    'models' => [
-        'cart' => env('CART_MODEL_CLASS', CartModel::class),
-    ],
-
     'money' => [
         'default_currency' => env('CART_DEFAULT_CURRENCY', 'MYR'),
         'rounding_mode' => env('CART_ROUNDING_MODE', 'half_up'), // half_up, half_even, floor, ceil
@@ -54,6 +48,7 @@ return [
     'owner' => [
         'enabled' => env('CART_OWNER_ENABLED', false),
         'include_global' => env('CART_OWNER_INCLUDE_GLOBAL', false),
+        'auto_assign_on_create' => env('CART_OWNER_AUTO_ASSIGN_ON_CREATE', true),
     ],
 
     /*
