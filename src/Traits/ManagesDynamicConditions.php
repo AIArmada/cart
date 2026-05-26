@@ -226,14 +226,15 @@ trait ManagesDynamicConditions
             'dynamic_conditions'
         );
 
-        Log::info('Restoring dynamic conditions', [
-            'count' => is_array($metadata) ? count($metadata) : 0,
-            'identifier' => $this->getIdentifier(),
-        ]);
-
-        if (empty($metadata) || ! is_array($metadata)) {
+        if (! is_array($metadata) || $metadata === []) {
             return $this; // No conditions to restore
         }
+
+        Log::debug('Restoring persisted dynamic conditions from cart metadata', [
+            'condition_count' => count($metadata),
+            'identifier' => $this->getIdentifier(),
+            'instance' => $this->instance(),
+        ]);
 
         foreach ($metadata as $name => $conditionData) {
             if (! isset($conditionData['rule_factory_key'])) {
