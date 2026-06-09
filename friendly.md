@@ -1,3 +1,33 @@
+## Second pass — 2026-06-09
+
+### Confirmed
+
+- `Actions/MigrateGuestCartToUserAction` exists as the canonical migration entrypoint.
+- `Services/CartMigrationService` still exists as a compatibility wrapper.
+- `Enums/CartMergeStrategy` enum, `Contracts/CartMergeStrategyInterface`, and `Services/CartMergeStrategyRegistry` all exist.
+- `Services/CartFactory` and `Conditions/Pipeline/ConditionPipelineFactory` exist for centralized cart/pipeline construction.
+- `Support/LoginMigrationIdentifierResolver` exists for shared identifier resolution.
+- `Actions/MigrateCartOnLoginAction` exists for the login migration workflow.
+- `Conditions/Handlers/ConditionTypeHandlerInterface` and `ConditionTypeHandlerRegistry` exist as the special condition-type handler seam (replacing the hard-coded shipping singleton).
+- `Services/RulePresets` delegates to `BuiltInRulesFactory` as canonical — confirmed via class docblock.
+- Tests exist at `tests/src/Cart/` with comprehensive coverage (~70 test files).
+
+### Still open
+
+None. All items resolved.
+
+### Resolved
+
+- `CartMigrationService` stripped to thin wrapper (delegates to `MigrateGuestCartToUserAction`). (2026-06-09)
+- `CartManager::swap()` now uses `$this->storage->withOwner(null)->swapIdentifier(...)` directly. (2026-06-09)
+- `LazyConditionPipelineTest` extended with custom phase processor and scope resolver parity tests. (2026-06-09)
+
+### Updated recommendation
+
+All Phase 1 and Phase 4 findings resolved.
+
+---
+
 # Cart package friendliness review
 
 Reviewed on 2026-06-07.
@@ -455,3 +485,72 @@ If I had to start with only three changes, I would do these first:
 1. consolidate guest-cart migration into one cart-owned action/use case,
 2. replace stringly merge branching with a real strategy seam,
 3. make the lazy pipeline honor the same extension points as the eager pipeline.
+
+
+## Refactor tracking
+
+This checklist tracks progress on the refactor plan above. Each item lists a concrete phase/step.
+Agents: claim an item by updating its status. Use `@agent-name` to claim ownership.
+
+Status legend:
+- `[pending]` — not started
+- `[in-progress]` — being worked on
+- `[done]` — completed and verified
+- `[blocked]` — blocked by another item
+
+### Phase 0 — Characterization coverage first
+
+- [done] extend `tests/src/Cart/Unit/LazyConditionPipelineTest.php` to assert lazy/eager parity with:
+- [done] extend `tests/src/Cart/Feature/Migration/MigrationTest.php` to cover:
+- [done] add or extend a test that proves identifier precedence is shared between both login listeners;
+- [done] add a regression test that preserves current singleton shipping semantics while refactoring the implementation.
+- [done] the current behavior is pinned well enough that the next phases can be mechanical.
+
+### Phase 1 — Choose one canonical migration entrypoint
+
+- [done] Pick the canonical orchestration class. — `MigrateGuestCartToUserAction`
+- [done] Move all merge helpers into that class.
+- [done] Make `CartMigrationService` either: — **Fixed 2026-06-09: stripped to thin wrapper delegating to MigrateGuestCartToUserAction.**
+- [done] Stop constructing the migration service manually in `CartManager::swap()`. — **Fixed 2026-06-09: uses storage->withOwner(null)->swapIdentifier() directly.**
+
+### Phase 2 — Introduce a real merge-strategy seam
+
+- [done] Add a `CartMergeStrategy` enum for built-in names.
+- [done] Add a `CartMergeStrategyInterface` and registry.
+- [done] Register built-in handlers for the current strategies.
+- [done] Resolve config to a strategy object instead of branching inline.
+
+### Phase 3 — Route cart and pipeline construction through factories
+
+- [done] Add a `CartFactory` that can clone a cart without losing collaborators.
+- [done] Add a `ConditionPipelineFactory` for eager and lazy pipeline construction.
+- [done] Replace direct `new Cart(...)`, `new ConditionPipeline`, and `new LazyConditionPipeline(...)` calls.
+- [done] Ensure factories preserve `conditionResolver`, `conditionProviderRegistry`, and any future pipeline collaborators.
+
+### Phase 4 — Unify lazy and eager pipeline execution
+
+- [done] Extract shared phase execution logic or make lazy evaluation delegate to the same resolver stack.
+- [done] Remove the duplicated partial-evaluation algorithm that bypasses phase processors / scope resolvers.
+- [done] Verify parity using the new characterization tests.
+- [done] Verify characterization tests actually cover custom phase processors and scope resolvers (not just basic totals). — **Fixed 2026-06-09: added `respects custom phase processors with lazy evaluation` and `respects custom scope resolvers with lazy evaluation` tests.**
+
+### Phase 5 — Extract login migration helpers
+
+- [done] Extract shared identifier resolution into one support class.
+- [done] Extract `MigrateCartOnLoginAction` for the actual workflow.
+- [done] Keep listeners thin and event-focused.
+- [done] Preserve existing session-flash behavior behind the action result.
+
+### Phase 6 — Replace the shipping special case with a condition-type handler seam
+
+- [done] Introduce a handler/registry abstraction for singleton or special condition types.
+- [done] Implement `shipping` with the current behavior.
+- [done] Keep the public shipping helpers as convenience methods.
+
+### Phase 7 — Collapse the duplicate rule catalogs
+
+- [done] Decide which layer is canonical (BuiltInRulesFactory).
+- [done] Make the other layer delegate to it (RulePresets delegates).
+- [done] Add parity tests for representative rule families.
+
+
