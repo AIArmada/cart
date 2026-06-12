@@ -52,6 +52,7 @@ return new class extends Migration
 
             $table->nullableUuidMorphs('owner');
 
+            $table->timestampTz('deactivated_at')->nullable();
             $table->timestampsTz();
 
             $table->unique(['owner_scope', 'name']);
@@ -65,6 +66,7 @@ return new class extends Migration
             $table->index('is_dynamic');
             $table->index('is_global');
             $table->index('order');
+            $table->index('deactivated_at');
         });
 
         if (
