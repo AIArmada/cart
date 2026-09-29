@@ -34,6 +34,7 @@ Examples:
 
 ```php
 use AIArmada\Cart\Conditions\CartCondition;
+use AIArmada\Cart\Conditions\Enums\ConditionPhase;
 use AIArmada\Cart\Conditions\Target;
 
 $condition = new CartCondition(
@@ -49,6 +50,9 @@ Cart::addCondition($condition);
 ```
 
 ### Using Presets
+
+Every preset takes its value first and the condition name last, so named
+arguments are the safest way to call them.
 
 ```php
 use AIArmada\Cart\Conditions\ConditionPresets;
@@ -135,6 +139,7 @@ Target::items()->applyPerItem()->build();
 Target::items()->applyPerUnit()->build();
 
 // PER_GROUP: Apply to grouped items
+// applyPerGroup() takes no arguments; pick the grouping field with groupBy().
 Target::items()->applyPerGroup()->groupBy('category')->build();
 ```
 
@@ -174,7 +179,7 @@ Fixed (non-percentage) values follow one contract with no exceptions:
 - Decimal strings are major units with half-up rounding: `'+5.00'` is 500 minor.
 - Percentage strings (`'-10%'`, `'+8%'`) are rates, not money.
 
-> [!WARNING]
+> **warning**
 > Whole numbers are exact minor units, so `'+5'` (5 minor) and `'+5.00'`
 > (500 minor) differ by 100x. This cliff is intentional: it keeps whole-number
 > money exact instead of routing it through float parsing. Always write the
@@ -215,12 +220,12 @@ Apply to specific items:
 ```php
 use AIArmada\Cart\Conditions\Enums\ConditionFilterOperator;
 
-// Filter by attribute
+// Filter by an item attribute
 $condition = new CartCondition(
     name: 'Category Discount',
     type: 'discount',
     target: Target::items()
-        ->where('category', ConditionFilterOperator::EQ, 'electronics')
+        ->whereAttribute('category', ConditionFilterOperator::EQ, 'electronics')
         ->build(),
     value: '-15%'
 );
@@ -230,8 +235,8 @@ $condition = new CartCondition(
     name: 'Premium Discount',
     type: 'discount',
     target: Target::items()
-        ->where('category', ConditionFilterOperator::IN, ['premium', 'gold'])
-        ->where('price', ConditionFilterOperator::GT, 5000)
+        ->whereAttribute('category', ConditionFilterOperator::IN, ['premium', 'gold'])
+        ->whereAttribute('price', ConditionFilterOperator::GT, 5000)
         ->build(),
     value: '-20%'
 );
@@ -265,41 +270,63 @@ $condition = new CartCondition(
 
 ## Condition Presets
 
-The `ConditionPresets` class provides 20+ ready-to-use conditions:
+The `ConditionPresets` class provides 24 ready-made condition factories. Every one
+takes the value first and the name last, so use named arguments.
 
 ### Discounts
 
 ```php
-ConditionPresets::percentageDiscount(10, 'Sale');
-ConditionPresets::fixedDiscount(500, '$5 Off');
-ConditionPresets::tieredDiscount([100 => 5, 500 => 10, 1000 => 15], 'Volume');
-ConditionPresets::bulkQuantityDiscount(3, 15, 'Bulk');
-ConditionPresets::percentageDiscountWithMinimum(20, 5000, 'Min $50');
-ConditionPresets::flashSaleDiscount(25, '2024-01-15', '2024-01-16', 'Flash');
+ConditionPresets::percentageDiscount(percentage: 10, name: 'Sale');
+ConditionPresets::fixedDiscount(amountCents: 500, name: '$5 Off');
+ConditionPresets::percentageDiscountWithMinimum(percentage: 10, minimumCents: 5000);
+ConditionPresets::fixedDiscountWithMinimum(amountCents: 500, minimumCents: 5000);
+ConditionPresets::tieredDiscount(tiers: [100 => 5, 500 => 10, 1000 => 15]);
+ConditionPresets::bulkQuantityDiscount(minimumQuantity: 3, percentage: 10);
+ConditionPresets::discountWithProduct(productId: 'SKU-001', percentage: 10);
+ConditionPresets::discountWithAnyProduct(productIds: ['SKU-001', 'SKU-002'], percentage: 10);
 ```
+
+`tieredDiscount()` returns a list of mutually exclusive conditions, one per tier.
 
 ### Fees & Charges
 
 ```php
-ConditionPresets::serviceFee(199, 'Handling');
-ConditionPresets::surcharge(2.5, 'Commission');
+ConditionPresets::serviceFee(amountCents: 199, name: 'Handling');
+ConditionPresets::surcharge(percentage: 2.5, name: 'Commission');
+ConditionPresets::smallOrderFee(feeCents: 199, minimumCents: 2000);
 ```
 
 ### Shipping
 
 ```php
-ConditionPresets::flatRateShipping(599, 'Standard');
-ConditionPresets::freeShippingOver(5000, 'Free Ship');
-ConditionPresets::shippingDiscount(5, 'Rate');
-ConditionPresets::freeShipping('Free Shipping');
+ConditionPresets::freeShipping();
+ConditionPresets::freeShippingOver(minimumCents: 5000, name: 'Free Ship');
+ConditionPresets::flatRateShipping(amountCents: 599, name: 'Standard');
+ConditionPresets::shippingDiscount(percentage: 5, name: 'Rate');
 ```
 
 ### Tax
 
 ```php
-ConditionPresets::taxRate(7, 'Sales Tax');
-ConditionPresets::taxExempt('Tax Exempt');
-ConditionPresets::taxRate(8, 'Combined');
+ConditionPresets::taxRate(percentage: 7, name: 'Sales Tax');
+ConditionPresets::taxExempt();
+```
+
+### Item-Level
+
+```php
+ConditionPresets::itemPercentageDiscount(percentage: 10);
+ConditionPresets::itemFixedDiscount(amountCents: 100);
+```
+
+### Time & Customer Based
+
+```php
+ConditionPresets::flashSaleDiscount(percentage: 25, startDate: '2024-01-15', endDate: '2024-01-16');
+ConditionPresets::happyHourDiscount(percentage: 20, startTime: '15:00', endTime: '17:00');
+ConditionPresets::weekendDiscount(percentage: 15);
+ConditionPresets::customerTagDiscount(tag: 'vip', percentage: 20);
+ConditionPresets::vipDiscount(percentage: 20);
 ```
 
 ## Condition Providers (Integrations)
@@ -370,7 +397,7 @@ Get detailed breakdown of condition calculations:
 ```php
 $result = Cart::evaluateConditionPipeline();
 
-$result->initialAmount; // Starting amount
+$result->initialAmount; // Starting amount (minor units)
 $result->finalAmount;   // After all conditions
 $result->subtotal();    // After subtotal phase
 $result->total();       // Grand total
@@ -379,4 +406,7 @@ $result->total();       // Grand total
 foreach ($result->phases() as $phase => $phaseResult) {
     echo "{$phase}: {$phaseResult->baseAmount} → {$phaseResult->finalAmount}";
 }
+
+// Single phase lookup
+$result->getPhaseResult(ConditionPhase::GRAND_TOTAL)?->adjustment;
 ```

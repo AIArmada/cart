@@ -328,10 +328,10 @@ use AIArmada\Cart\Facades\Cart;
 Cart::add('SKU-001', 'Product', 999, 1);
 
 // Wishlist
-Cart::setInstance('wishlist')->add('SKU-002', 'Wishlist Item', 1999, 1);
+Cart::getCartInstance('wishlist')->add('SKU-002', 'Wishlist Item', 1999, 1);
 
 // Compare list
-Cart::setInstance('compare')->add('SKU-003', 'Compare Item', 2999, 1);
+Cart::getCartInstance('compare')->add('SKU-003', 'Compare Item', 2999, 1);
 
 // Get current instance name
 $name = Cart::instance(); // 'default'
@@ -422,17 +422,25 @@ $action->execute(
 
 ### Login-Bound Migration
 
-`MigrateCartOnLoginAction` resolves the guest session ID from cached login credentials automatically:
+`MigrateCartOnLoginAction::execute()` requires the guest session ID. When
+`$sessionId` is `null` or an empty string it returns early with
+`['success' => false, 'itemsMerged' => 0, 'message' => 'No guest session to migrate']`.
+
+The session ID must be captured **before** auth regenerates the session —
+`CartServiceProvider` does that on the `Attempting` event and hands the captured
+ID to the `Login` listener.
 
 ```php
 use AIArmada\Cart\Actions\MigrateCartOnLoginAction;
 
 $action = app(MigrateCartOnLoginAction::class);
 
-$result = $action->execute(user: $user, instance: 'default');
-
-// Or pass session ID explicitly
+// The session ID is required.
 $result = $action->execute(user: $user, instance: 'default', sessionId: 'session-abc');
+
+$result['success'];      // bool
+$result['itemsMerged'];  // int — sum of guest quantities migrated
+$result['message'];      // string
 ```
 
 ### Merge Strategy
@@ -482,3 +490,32 @@ $registry->register($yourHandler, 'my-strategy');
 // Then reference in config:
 // 'migration' => ['merge_strategy' => 'my-strategy'],
 ```
+
+## Console commands
+
+| Command | Purpose |
+|---------|---------|
+| `cart:clear-abandoned` | Clear or mark abandoned carts and cart snapshots |
+
+Key options for `cart:clear-abandoned`:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `--days=` | `7` | Age in days before a cart is considered abandoned |
+| `--expired` | off | Only clear carts past their `expires_at` timestamp |
+| `--mark-only` | off | Mark abandoned snapshots without clearing live carts |
+| `--minutes=` | `cart.snapshots.abandonment_detection_minutes` (30) | Inactivity window used by `--mark-only` |
+| `--delete` | off | Physically delete carts that already have `abandoned_at` set |
+| `--dry-run` | off | Report what would change without writing |
+| `--all-owners` | off | Process every owner when no owner context is resolved |
+| `--confirm-all-owners` | off | Required with `--all-owners --mark-only` to mutate snapshots |
+| `--max-affected=` | `1000` | Refuse to mark more snapshots than this in one run |
+| `--force-threshold` | off | Allow marking above `--max-affected` |
+| `--strict-owner-tuples` | off | Abort on malformed owner tuples instead of skipping |
+| `--batch-size=` | `1000` | Records processed per batch |
+
+> **warning**
+> When `cart.owner.enabled` is `true` and no owner context is resolved, the
+> command fails unless `--all-owners` is passed. `--mark-only` additionally
+> requires `--confirm-all-owners`, so run `--dry-run` first.
+
