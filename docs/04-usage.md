@@ -154,6 +154,30 @@ $count = Cart::count();
 shared money primitive. Money objects remain useful for arithmetic and return
 minor-unit amounts.
 
+### Checkout integration
+
+`Cart` implements `CheckoutableInterface`, so gateways such as CHIP accept it
+directly:
+
+```php
+use AIArmada\Chip\Gateways\ChipGateway;
+
+$gateway = app(ChipGateway::class);
+
+$payment = $gateway->createPayment($cart, $customer, [
+    'success_url' => route('checkout.success'),
+    'failure_url' => route('checkout.failed'),
+]);
+```
+
+The mapping always reconciles (`total = subtotal - discount + tax`):
+
+- Line items report condition-adjusted unit prices with zero line discounts.
+- The discount term holds net cart-level price reductions; net surcharges
+  surface on the tax term instead, so gateways never receive negative money.
+- The reference is the stored cart id, falling back to `identifier:instance`.
+- The cart must contain at least one item; gateways reject empty checkouts.
+
 ## Working with Conditions
 
 ### Simple Conditions
@@ -204,7 +228,7 @@ Cart::clearConditions();
 
 ## Cart Snapshot Contract
 
-Use `Cart::content()` (or `Cart::getContent()`) to capture a normalized snapshot of the cart state. Checkout sessions store this snapshot as `cart_snapshot`.
+Use `Cart::content()` (or `Cart::getContent()`) to capture the base normalized snapshot of the cart state. Checkout sessions augment it with `item_count`, `totals`, and `captured_at`, then store it as `cart_snapshot`.
 
 ```json
 {
@@ -235,7 +259,7 @@ Use `Cart::content()` (or `Cart::getContent()`) to capture a normalized snapshot
     "total": 9998,
     "quantity": 2,
     "count": 1,
-    "item_count": 2,
+    "item_count": 1,
     "totals": {
         "subtotal": 9998,
         "total": 9998,
@@ -252,7 +276,7 @@ Notes:
 - `price` and totals are stored in the smallest currency unit (cents).
 - String prices: integers are minor units (`'999'` is 999 minor); decimals are major units (`'9.99'` is 999 minor). Thousand separators always imply major units (`'1,000'` is 100000 minor, same as `'1,000.00'`).
 - `attributes.weight` is in grams when provided.
-- `item_count` reflects total quantity; `count` reflects unique line items.
+- `item_count` mirrors `count` (unique line items); `quantity` reflects total quantity.
 - `associated_model` is populated when cart items are linked to Eloquent models.
 
 ## Working with Metadata
@@ -298,10 +322,10 @@ use AIArmada\Cart\Facades\Cart;
 Cart::add('SKU-001', 'Product', 999, 1);
 
 // Wishlist
-Cart::getCartInstance('wishlist')->add('SKU-002', 'Wishlist Item', 1999, 1);
+Cart::setInstance('wishlist')->add('SKU-002', 'Wishlist Item', 1999, 1);
 
 // Compare list
-Cart::getCartInstance('compare')->add('SKU-003', 'Compare Item', 2999, 1);
+Cart::setInstance('compare')->add('SKU-003', 'Compare Item', 2999, 1);
 
 // Get current instance name
 $name = Cart::instance(); // 'default'
@@ -392,25 +416,17 @@ $action->execute(
 
 ### Login-Bound Migration
 
-`MigrateCartOnLoginAction::execute()` requires the guest session ID. When
-`$sessionId` is `null` or an empty string it returns early with
-`['success' => false, 'itemsMerged' => 0, 'message' => 'No guest session to migrate']`.
-
-The session ID must be captured **before** auth regenerates the session —
-`CartServiceProvider` does that on the `Attempting` event and hands the captured
-ID to the `Login` listener.
+`MigrateCartOnLoginAction` resolves the guest session ID from cached login credentials automatically:
 
 ```php
 use AIArmada\Cart\Actions\MigrateCartOnLoginAction;
 
 $action = app(MigrateCartOnLoginAction::class);
 
-// The session ID is required.
-$result = $action->execute(user: $user, instance: 'default', sessionId: 'session-abc');
+$result = $action->execute(user: $user, instance: 'default');
 
-$result['success'];      // bool
-$result['itemsMerged'];  // int — sum of guest quantities migrated
-$result['message'];      // string
+// Or pass session ID explicitly
+$result = $action->execute(user: $user, instance: 'default', sessionId: 'session-abc');
 ```
 
 ### Merge Strategy
@@ -460,32 +476,3 @@ $registry->register($yourHandler, 'my-strategy');
 // Then reference in config:
 // 'migration' => ['merge_strategy' => 'my-strategy'],
 ```
-
-## Console commands
-
-| Command | Purpose |
-|---------|---------|
-| `cart:clear-abandoned` | Clear or mark abandoned carts and cart snapshots |
-
-Key options for `cart:clear-abandoned`:
-
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `--days=` | `7` | Age in days before a cart is considered abandoned |
-| `--expired` | off | Only clear carts past their `expires_at` timestamp |
-| `--mark-only` | off | Mark abandoned snapshots without clearing live carts |
-| `--minutes=` | `cart.snapshots.abandonment_detection_minutes` (30) | Inactivity window used by `--mark-only` |
-| `--delete` | off | Physically delete carts that already have `abandoned_at` set |
-| `--dry-run` | off | Report what would change without writing |
-| `--all-owners` | off | Process every owner when no owner context is resolved |
-| `--confirm-all-owners` | off | Required with `--all-owners --mark-only` to mutate snapshots |
-| `--max-affected=` | `1000` | Refuse to mark more snapshots than this in one run |
-| `--force-threshold` | off | Allow marking above `--max-affected` |
-| `--strict-owner-tuples` | off | Abort on malformed owner tuples instead of skipping |
-| `--batch-size=` | `1000` | Records processed per batch |
-
-> **warning**
-> When `cart.owner.enabled` is `true` and no owner context is resolved, the
-> command fails unless `--all-owners` is passed. `--mark-only` additionally
-> requires `--confirm-all-owners`, so run `--dry-run` first.
-

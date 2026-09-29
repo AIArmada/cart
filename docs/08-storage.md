@@ -105,11 +105,8 @@ try {
     Cart::add('SKU-001', 'Product', 999, 1);
 } catch (CartConflictException $e) {
     // Cart was modified by another request
-    $e->getAttemptedVersion(); // What we tried to write
-    $e->getCurrentVersion();   // What is actually in storage
-    $e->getVersionDifference();
-    $e->isMinorConflict();
-    $e->getResolutionSuggestions();
+    $e->getAttemptedVersion(); // What we expected
+    $e->getCurrentVersion();   // What we found
 
     // Retry or inform user
 }
@@ -198,7 +195,7 @@ $result = $migrationService->migrateGuestCartForUser(
 // $result->itemsMerged is the sum of guest quantities migrated.
 ```
 
-> **warning**
+> [!WARNING]
 > `swap()` transfers a cart only when the target identifier is empty. A swap
 > into an occupied target is refused (`false`, both carts untouched) instead of
 > overwriting the target. Use the guest-to-user migration when contents must be
@@ -241,10 +238,8 @@ use AIArmada\Cart\Actions\MigrateCartOnLoginAction;
 
 $action = app(MigrateCartOnLoginAction::class);
 
-// The guest session id is required. Omit it and the action short-circuits
-// with success = false; `HandleUserLogin` is what pulls the id off the
-// session stashed by `HandleUserLoginAttempt`.
-$result = $action->execute(user: $user, instance: 'default', sessionId: 'session-abc');
+// Auto-resolves session ID from cached login identifiers
+$result = $action->execute(user: $user, instance: 'default');
 
 // Returns ['success' => bool, 'itemsMerged' => int, 'message' => string]
 $result['success'];
