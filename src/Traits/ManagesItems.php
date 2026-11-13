@@ -110,6 +110,7 @@ trait ManagesItems
 
             $item = $cartItems->get($id);
             assert($item !== null, 'Item should exist since we checked has()');
+            $this->assertRawLineCanBeChanged($item);
 
             // Handle quantity updates
             if (isset($data['quantity'])) {
@@ -142,6 +143,11 @@ trait ManagesItems
                 if (isset($data[$property])) {
                     $method = 'set' . ucfirst($property);
                     $value = $property === 'price' ? $this->normalizePrice($data[$property]) : $data[$property];
+
+                    if ($property === 'attributes' && is_array($value)) {
+                        $value = $this->withoutCanonicalCompositeAttributes($value);
+                    }
+
                     $item = $item->$method($value);
                 }
             }
@@ -287,6 +293,8 @@ trait ManagesItems
         // Normalize ID to string for consistent handling
         $id = (string) $id;
 
+        $attributes = $this->withoutCanonicalCompositeAttributes($attributes);
+
         $addedItem = null;
         $isFirstItem = false;
 
@@ -314,6 +322,7 @@ trait ManagesItems
                 // Update existing item quantity
                 $existingItem = $cartItems->get($id);
                 assert($existingItem !== null, 'Item should exist since we checked has()');
+                $this->assertRawLineCanBeChanged($existingItem);
                 $item = $item->setQuantity($existingItem->quantity + $quantity);
             }
 
@@ -432,6 +441,7 @@ trait ManagesItems
                 if ($cartItems->has($row['id'])) {
                     $existingItem = $cartItems->get($row['id']);
                     assert($existingItem !== null, 'Item should exist since we checked has()');
+                    $this->assertRawLineCanBeChanged($existingItem);
                     $item = $item->setQuantity($existingItem->quantity + $row['quantity']);
                 }
 
@@ -490,7 +500,7 @@ trait ManagesItems
             'name' => $item['name'] ?? null,
             'price' => $item['price'] ?? null,
             'quantity' => $this->resolveIntQuantity($item['quantity'] ?? 1, "import row [{$index}] quantity"),
-            'attributes' => $attributes,
+            'attributes' => $this->withoutCanonicalCompositeAttributes($attributes),
             'conditions' => $item['conditions'] ?? null,
             'associated_model' => $item['associated_model'] ?? null,
         ];
@@ -514,6 +524,31 @@ trait ManagesItems
         }
 
         throw new InvalidCartItemException("Cart item quantity for {$context} must be an integer.");
+    }
+
+    private function assertRawLineCanBeChanged(CartItem $item): void
+    {
+        if ($item->hasAttribute('components')) {
+            throw new InvalidCartItemException('Use updateBuyable() to change a composite cart line.');
+        }
+    }
+
+    /**
+     * Strip composition keys from caller-supplied raw line attributes.
+     *
+     * A composite composition is only ever produced by the canonical buyable
+     * path. Checkout, inventory, orders, and shipping all trust a line that
+     * declares `components`, so a raw add or update must never be able to
+     * declare itself composite.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function withoutCanonicalCompositeAttributes(array $attributes): array
+    {
+        unset($attributes['components'], $attributes['components_fingerprint']);
+
+        return $attributes;
     }
 
     /**
